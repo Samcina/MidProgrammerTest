@@ -9,6 +9,7 @@
 
 class USpringArmComponent;
 class UCameraComponent;
+class UHealthComponent;
 class UInputMappingContext;
 class UInputAction;
 class UUserWidget;
@@ -32,6 +33,9 @@ protected:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = Camera, meta = (AllowPrivateAccess = "true"))
 	UCameraComponent* FollowCamera;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = Components, meta = (AllowPrivateAccess = "true"))
+	UHealthComponent* HealthComponent;
 
 #pragma endregion
 
@@ -60,6 +64,12 @@ protected:
 
 protected:
 
+	void FireExplosion();
+	UFUNCTION(Server, Reliable)
+	void Server_Explosion();
+	UFUNCTION(NetMulticast, Reliable)
+	void NetMulticast_SpawnExplosionParticles(FVector location);
+	
 	UPROPERTY(EditDefaultsOnly, Category = "Explosion")
 	UParticleSystem* ExplosionEffect;
 
@@ -89,6 +99,8 @@ protected:
 	
 	virtual void BeginPlay();
 
+	virtual float TakeDamage(float DamageAmount, struct FDamageEvent const& DamageEvent, class AController* EventInstigator, AActor* DamageCauser);
+
 #pragma endregion
 
 #pragma region Move&Look
@@ -107,6 +119,7 @@ public:
 
 	FORCEINLINE class USpringArmComponent* GetCameraBoom() const { return CameraBoom; }
 	FORCEINLINE class UCameraComponent* GetFollowCamera() const { return FollowCamera; }
+	FORCEINLINE class UHealthComponent* GetHealthComponent() const { return HealthComponent; }
 
 #pragma endregion
 

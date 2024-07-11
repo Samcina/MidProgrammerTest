@@ -10,10 +10,15 @@
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "InputActionValue.h"
+#include "HealthComponent.h"
 
 #include "Blueprint/UserWidget.h"
+#include <Kismet/GameplayStatics.h>
 
 DEFINE_LOG_CATEGORY(LogTemplateCharacter);
+
+
+
 
 AMidProgrammerTestCharacter::AMidProgrammerTestCharacter()
 {
@@ -41,8 +46,11 @@ AMidProgrammerTestCharacter::AMidProgrammerTestCharacter()
 	FollowCamera = CreateDefaultSubobject<UCameraComponent>(TEXT("FollowCamera"));
 	FollowCamera->SetupAttachment(CameraBoom, USpringArmComponent::SocketName);
 	FollowCamera->bUsePawnControlRotation = false; 
-	
 
+	HealthComponent = CreateDefaultSubobject<UHealthComponent>(TEXT("HealthComponent"));
+	HealthComponent->SetIsReplicated(true);
+	
+	SetCanBeDamaged(true);
 }
 
 void AMidProgrammerTestCharacter::BeginPlay()
@@ -53,6 +61,27 @@ void AMidProgrammerTestCharacter::BeginPlay()
 	if (PC)
 		UE_LOG(LogTemplateCharacter, Log, TEXT("PC is set!"));
 
+}
+
+float AMidProgrammerTestCharacter::TakeDamage(float DamageAmount, FDamageEvent const& DamageEvent, AController* EventInstigator, AActor* DamageCauser)
+{
+	Super::TakeDamage(DamageAmount, DamageEvent, EventInstigator, DamageCauser);
+
+	if (HealthComponent->GetCurrentHealth() != 0) {
+		if (HasAuthority()) UE_LOG(LogTemplateCharacter, Log, TEXT("Received %f damage!"), DamageAmount);
+		HealthComponent->TakeDamage(DamageAmount);
+
+		if (HealthComponent->GetCurrentHealth() == 0)
+		{
+			if (APlayerController* playerController = Cast<APlayerController>(GetController()))
+			{
+				if (HasAuthority()) UE_LOG(LogTemplateCharacter, Log, TEXT("Character has died! X("), DamageAmount);
+				DisableInput(playerController);
+			}
+		}
+	}
+	
+	return DamageAmount;
 }
 
 void AMidProgrammerTestCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
@@ -78,6 +107,9 @@ void AMidProgrammerTestCharacter::SetupPlayerInputComponent(UInputComponent* Pla
 
 		// Looking
 		EnhancedInputComponent->BindAction(LookAction, ETriggerEvent::Triggered, this, &AMidProgrammerTestCharacter::Look);
+
+		// Firing
+		EnhancedInputComponent->BindAction(FireAction, ETriggerEvent::Triggered, this, &AMidProgrammerTestCharacter::FireExplosion);
 
 	}
 	else
@@ -125,3 +157,37 @@ void AMidProgrammerTestCharacter::Look(const FInputActionValue& Value)
 }
 
 #pragma endregion
+
+void AMidProgrammerTestCharacter::FireExplosion()
+{
+	if (Controller != nullptr)
+	{
+		Server_Explosion();
+	}
+}
+
+void AMidProgrammerTestCharacter::Server_Explosion_Implementation()
+{
+	FHitResult Hit;
+
+	FVector TraceStart = FollowCamera->GetComponentLocation();
+	FVector TraceEnd = FollowCamera->GetComponentLocation() + FollowCamera->GetComponentRotation().Vector() * 10000.0f;
+
+	FCollisionQueryParams QueryParams;
+	QueryParams.AddIgnoredActor(this);
+
+	TEnumAsByte<ECollisionChannel> TraceChannelProperty = ECC_Pawn;
+	GetWorld()->LineTraceSingleByChannel(Hit, TraceStart, TraceEnd, TraceChannelProperty, QueryParams);
+
+	if (Hit.bBlockingHit && IsValid(Hit.GetActor()))
+	{
+		FVector SpawnLocation = Hit.ImpactPoint;
+		NetMulticast_SpawnExplosionParticles(SpawnLocation);
+	}
+}
+
+void AMidProgrammerTestCharacter::NetMulticast_SpawnExplosionParticles_Implementation(FVector location)
+{
+	UGameplayStatics::SpawnEmitterAtLocation(GetWorld(), ExplosionEffect, location, FRotator(0,0,0));
+	UGameplayStatics::ApplyRadialDamage(this, 30.0f, location, 200.0f, nullptr, TArray<AActor*>(), this, Controller);
+}
